@@ -81,8 +81,6 @@ int swConnection_onSendfile(swConnection *conn, swBuffer_trunk *chunk)
     if (task->offset >= task->filesize)
     {
         swBuffer_pop_trunk(conn->out_buffer, chunk);
-        close(task->fd);
-        sw_free(task);
 
 #ifdef HAVE_TCP_NOPUSH
         if (conn->tcp_nopush)
@@ -128,8 +126,8 @@ int swConnection_buffer_send(swConnection *conn)
         swBuffer_pop_trunk(buffer, trunk);
         return SW_OK;
     }
+
     ret = swConnection_send(conn, trunk->store.ptr + trunk->offset, sendn, 0);
-    //printf("BufferOut: reactor=%d|sendn=%d|ret=%d|trunk->offset=%d|trunk_len=%d\n", reactor->id, sendn, ret, trunk->offset, trunk->length);
     if (ret < 0)
     {
         switch (swConnection_error(errno))
@@ -138,6 +136,7 @@ int swConnection_buffer_send(swConnection *conn)
             swWarn("send to fd[%d] failed. Error: %s[%d]", conn->fd, strerror(errno), errno);
             break;
         case SW_CLOSE:
+            conn->close_errno = errno;
             conn->close_wait = 1;
             return SW_ERR;
         case SW_WAIT:
@@ -210,6 +209,14 @@ int swConnection_get_port(swConnection *conn)
     }
 }
 
+void swConnection_sendfile_destructor(swBuffer_trunk *chunk)
+{
+    swTask_sendfile *task = chunk->store.ptr;
+    close(task->fd);
+    sw_strdup_free(task->filename);
+    sw_free(task);
+}
+
 int swConnection_sendfile(swConnection *conn, char *filename)
 {
     if (conn->out_buffer == NULL)
@@ -221,6 +228,7 @@ int swConnection_sendfile(swConnection *conn, char *filename)
         }
     }
 
+    swBuffer_trunk error_chunk;
     swTask_sendfile *task = sw_malloc(sizeof(swTask_sendfile));
     if (task == NULL)
     {
@@ -233,33 +241,34 @@ int swConnection_sendfile(swConnection *conn, char *filename)
     int file_fd = open(filename, O_RDONLY);
     if (file_fd < 0)
     {
-        free(task->filename);
+        sw_strdup_free(task->filename);
         free(task);
         swSysError("open(%s) failed.", task->filename);
         return SW_ERR;
     }
+    task->fd = file_fd;
 
     struct stat file_stat;
     if (fstat(file_fd, &file_stat) < 0)
     {
-        free(task->filename);
-        free(task);
         swSysError("fstat(%s) failed.", filename);
+        error_chunk.store.ptr = task;
+        swConnection_sendfile_destructor(&error_chunk);
         return SW_ERR;
     }
-
-    swBuffer_trunk *trunk = swBuffer_new_trunk(conn->out_buffer, SW_CHUNK_SENDFILE, 0);
-    if (trunk == NULL)
-    {
-        free(task->filename);
-        free(task);
-        swWarn("get out_buffer trunk failed.");
-        return SW_ERR;
-    }
-
     task->filesize = file_stat.st_size;
-    task->fd = file_fd;
-    trunk->store.ptr = (void *) task;
+
+    swBuffer_trunk *chunk = swBuffer_new_trunk(conn->out_buffer, SW_CHUNK_SENDFILE, 0);
+    if (chunk == NULL)
+    {
+        swWarn("get out_buffer trunk failed.");
+        error_chunk.store.ptr = task;
+        swConnection_sendfile_destructor(&error_chunk);
+        return SW_ERR;
+    }
+
+    chunk->store.ptr = (void *) task;
+    chunk->destroy = swConnection_sendfile_destructor;
 
     return SW_OK;
 }
@@ -275,9 +284,9 @@ void swConnection_clear_string_buffer(swConnection *conn)
     }
 }
 
-volatile swBuffer_trunk* swConnection_get_in_buffer(swConnection *conn)
+swBuffer_trunk* swConnection_get_in_buffer(swConnection *conn)
 {
-    volatile swBuffer_trunk *trunk = NULL;
+    swBuffer_trunk *trunk = NULL;
     swBuffer *buffer;
 
     if (conn->in_buffer == NULL)
@@ -309,9 +318,9 @@ volatile swBuffer_trunk* swConnection_get_in_buffer(swConnection *conn)
     return trunk;
 }
 
-volatile swBuffer_trunk* swConnection_get_out_buffer(swConnection *conn, uint32_t type)
+swBuffer_trunk* swConnection_get_out_buffer(swConnection *conn, uint32_t type)
 {
-    volatile swBuffer_trunk *trunk;
+    swBuffer_trunk *trunk;
     if (conn->out_buffer == NULL)
     {
         conn->out_buffer = swBuffer_new(SW_BUFFER_SIZE);

@@ -276,7 +276,7 @@ static int swReactorKqueue_wait(swReactor *reactor, struct timeval *timeo)
         }
     }
 
-    while (SwooleG.running > 0)
+    while (reactor->running > 0)
     {
         if (reactor->timeout_msec > 0)
         {
@@ -323,7 +323,7 @@ static int swReactorKqueue_wait(swReactor *reactor, struct timeval *timeo)
                 event.socket = swReactor_get(reactor, event.fd);
 
                 //read
-                if (object->events[i].filter == EVFILT_READ)
+                if (object->events[i].filter == EVFILT_READ && !event.socket->removed)
                 {
                     handle = swReactor_getHandle(reactor, SW_EVENT_READ, event.type);
                     ret = handle(reactor, &event);

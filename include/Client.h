@@ -25,61 +25,74 @@
 
 typedef struct _swClient
 {
-	int id;
-	int type;
-	int sock_type;
-	int sock_domain;
-	int protocol;
-	int reactor_fdtype;
+    int id;
+    int type;
+    int _sock_type;
+    int _sock_domain;
+    int _protocol;
+    int reactor_fdtype;
 
-	uint8_t async;
-	uint8_t keep;
-	uint8_t packet_mode;
+    uint32_t async :1;
+    uint32_t keep :1;
+    uint32_t released :1;
 
-	uint8_t open_eof_check;
-	char *package_eof;
-	uint16_t package_eof_len;
+    /**
+     * one package: length check
+     */
+    uint32_t open_length_check :1;
+    uint32_t open_eof_check :1;
 
-	/* one package: length check */
-    uint8_t open_length_check;
+    swProtocol protocol;
 
-    char package_length_type;
-    uint8_t package_length_size;
-    uint16_t package_length_offset;
-    uint16_t package_body_offset;
-    uint32_t package_max_length;
+    char *server_str;
+    void *ptr;
+    void *params;
 
-	char *server_str;
-	void *ptr;
+    uint8_t server_strlen;
+    double timeout;
 
-	uint8_t server_strlen;
-	double timeout;
+    /**
+     * sendto, read only.
+     */
+    swSocketAddress server_addr;
 
-	/**
-	 * sendto, read only.
-	 */
-	swSocketAddress server_addr;
+    /**
+     * recvfrom
+     */
+    swSocketAddress remote_addr;
 
-	/**
-	 * recvfrom
-	 */
-	swSocketAddress remote_addr;
+    swConnection *socket;
+    void *object;
 
-	swConnection *socket;
+    swString *buffer;
+    uint32_t wait_length;
+    uint32_t buffer_input_size;
 
-	void (*onConnect)(struct _swClient *cli);
-	int (*onReceive)(struct _swClient *cli, swSendData *data);
-	void (*onClose)(struct _swClient *cli, int fd, int from_id);
+#ifdef SW_USE_OPENSSL
+    uint8_t open_ssl :1;
+    uint8_t ssl_disable_compress :1;
+    uint8_t ssl_verify :1;
+    char *ssl_cert_file;
+    char *ssl_key_file;
+    SSL_CTX *ssl_context;
+    uint8_t ssl_method;
+#endif
 
-	int (*connect)(struct _swClient *cli, char *host, int port, double _timeout, int sock_flag);
-	int (*send)(struct _swClient *cli, char *data, int length);
-	int (*sendfile)(struct _swClient *cli, char *filename);
-	int (*recv)(struct _swClient *cli, char *data, int len, int waitall);
-	int (*close)(struct _swClient *cli);
+    void (*onConnect)(struct _swClient *cli);
+    void (*onError)(struct _swClient *cli);
+    void (*onReceive)(struct _swClient *cli, char *data, uint32_t length);
+    void (*onClose)(struct _swClient *cli);
+
+    int (*connect)(struct _swClient *cli, char *host, int port, double _timeout, int sock_flag);
+    int (*send)(struct _swClient *cli, char *data, int length, int flags);
+    int (*sendfile)(struct _swClient *cli, char *filename);
+    int (*recv)(struct _swClient *cli, char *data, int len, int flags);
+    int (*close)(struct _swClient *cli);
 
 } swClient;
 
 int swClient_create(swClient *cli, int type, int async);
+void swClient_free(swClient *cli);
 
 typedef struct
 {

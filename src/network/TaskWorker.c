@@ -29,6 +29,7 @@ void swTaskWorker_init(swProcessPool *pool)
     pool->onWorkerStop = swTaskWorker_onStop;
     pool->type = SW_PROCESS_TASKWORKER;
     pool->start_id = SwooleG.serv->worker_num;
+    pool->run_worker_num = SwooleG.task_worker_num;
 
     char *tmp_dir = swoole_dirname(SwooleG.task_tmpdir);
     //create tmp dir
@@ -36,11 +37,13 @@ void swTaskWorker_init(swProcessPool *pool)
     {
         swWarn("create task tmp dir failed.");
     }
-    free(tmp_dir);
-
-    if (SwooleG.task_dispatch_mode == SW_DISPATCH_QUEUE || SwooleG.task_ipc_mode == 3)
+    if (SwooleG.task_ipc_mode == SW_TASK_IPC_PREEMPTIVE)
     {
         pool->dispatch_mode = SW_DISPATCH_QUEUE;
+    }
+    if (tmp_dir)
+    {
+        sw_strdup_free(tmp_dir);
     }
 }
 
@@ -67,7 +70,6 @@ int swTaskWorker_onTask(swProcessPool *pool, swEventData *task)
     swServer *serv = pool->ptr;
     current_task = task;
 
-    SwooleWG.worker->status = SW_WORKER_BUSY;
     if (task->info.type == SW_EVENT_PIPE_MESSAGE)
     {
         serv->onPipeMessage(serv, task);
@@ -76,7 +78,6 @@ int swTaskWorker_onTask(swProcessPool *pool, swEventData *task)
     {
         ret = serv->onTask(serv, task);
     }
-    SwooleWG.worker->status = SW_WORKER_IDLE;
 
     return ret;
 }
@@ -88,19 +89,15 @@ int swTaskWorker_large_pack(swEventData *task, void *data, int data_len)
 
     memcpy(pkg.tmpfile, SwooleG.task_tmpdir, SwooleG.task_tmpdir_len);
 
-#ifdef HAVE_MKOSTEMP
-    int tpm_fd = mkostemp(pkg.tmpfile, O_WRONLY);
-#else
-    int tpm_fd = mkstemp(pkg.tmpfile);
-#endif
-
-    if (tpm_fd < 0)
+    //create temp file
+    int tmp_fd = swoole_tmpfile(pkg.tmpfile);
+    if (tmp_fd < 0)
     {
-        swWarn("mkdtemp(%s) failed. Error: %s[%d]", pkg.tmpfile, strerror(errno), errno);
         return SW_ERR;
     }
 
-    if (swoole_sync_writefile(tpm_fd, data, data_len) <= 0)
+    //write to file
+    if (swoole_sync_writefile(tmp_fd, data, data_len) <= 0)
     {
         swWarn("write to tmpfile failed.");
         return SW_ERR;
@@ -112,7 +109,7 @@ int swTaskWorker_large_pack(swEventData *task, void *data, int data_len)
 
     pkg.length = data_len;
     memcpy(task->data, &pkg, sizeof(swPackage_task));
-    close(tpm_fd);
+    close(tmp_fd);
     return SW_OK;
 }
 
@@ -123,7 +120,7 @@ static void swTaskWorker_signal_init(void)
     swSignal_set(SIGUSR1, NULL, 1, 0);
     swSignal_set(SIGUSR2, NULL, 1, 0);
     swSignal_set(SIGTERM, swWorker_signal_handler, 1, 0);
-    swSignal_set(SIGALRM, swTimer_signal_handler, 1, 0);
+    swSignal_set(SIGALRM, swSystemTimer_signal_handler, 1, 0);
 }
 
 void swTaskWorker_onStart(swProcessPool *pool, int worker_id)
@@ -137,7 +134,9 @@ void swTaskWorker_onStart(swProcessPool *pool, int worker_id)
     swTaskWorker_signal_init();
     swWorker_onStart(serv);
 
+    SwooleG.main_reactor = NULL;
     SwooleWG.worker = swProcessPool_get_worker(pool, worker_id);
+    SwooleWG.worker->status = SW_WORKER_IDLE;
 }
 
 void swTaskWorker_onStop(swProcessPool *pool, int worker_id)
@@ -158,16 +157,24 @@ int swTaskWorker_finish(swServer *serv, char *data, int data_len, int flags)
         return SW_ERR;
     }
 
+    uint16_t source_worker_id = current_task->info.from_id;
+    swWorker *worker = swServer_get_worker(serv, source_worker_id);
+
     int ret;
     //for swoole_server_task
     if (swTask_type(current_task) & SW_TASK_NONBLOCK)
     {
         buf.info.type = SW_EVENT_FINISH;
         buf.info.fd = current_task->info.fd;
+        //callback function
+        if (swTask_type(current_task) & SW_TASK_CALLBACK)
+        {
+            flags |= SW_TASK_CALLBACK;
+        }
         swTask_type(&buf) = flags;
 
         //write to file
-        if (data_len >= sizeof(buf.data))
+        if (data_len >= SW_IPC_MAX_SIZE - sizeof(buf.info))
         {
             if (swTaskWorker_large_pack(&buf, data, data_len) < 0 )
             {
@@ -181,20 +188,20 @@ int swTaskWorker_finish(swServer *serv, char *data, int data_len, int flags)
             buf.info.len = data_len;
         }
 
-        uint16_t target_worker_id = current_task->info.from_id;
-        swWorker *worker = swServer_get_worker(serv, target_worker_id);
         ret = swWorker_send2worker(worker, &buf, sizeof(buf.info) + buf.info.len, SW_PIPE_MASTER);
     }
     else
     {
         uint64_t flag = 1;
-        uint16_t worker_id = current_task->info.from_id;
 
         /**
          * Use worker shm store the result
          */
-        swEventData *result = &(SwooleG.task_result[worker_id]);
-        swPipe *task_notify_pipe = &(SwooleG.task_notify[worker_id]);
+        swEventData *result = &(SwooleG.task_result[source_worker_id]);
+        swPipe *task_notify_pipe = &(SwooleG.task_notify[source_worker_id]);
+
+        //lock worker
+        worker->lock.lock(&worker->lock);
 
         result->info.type = SW_EVENT_FINISH;
         result->info.fd = current_task->info.fd;
@@ -204,6 +211,8 @@ int swTaskWorker_finish(swServer *serv, char *data, int data_len, int flags)
         {
             if (swTaskWorker_large_pack(result, data, data_len) < 0)
             {
+                //unlock worker
+                worker->lock.unlock(&worker->lock);
                 swWarn("large task pack failed()");
                 return SW_ERR;
             }
@@ -214,10 +223,17 @@ int swTaskWorker_finish(swServer *serv, char *data, int data_len, int flags)
             result->info.len = data_len;
         }
 
+        //unlock worker
+        worker->lock.unlock(&worker->lock);
+
         while (1)
         {
             ret = task_notify_pipe->write(task_notify_pipe, &flag, sizeof(flag));
-            if (ret < 0 && errno == EAGAIN)
+#ifdef HAVE_KQUEUE
+            if (errno == EAGAIN || errno == ENOBUFS)
+#else
+            if (errno == EAGAIN)
+#endif
             {
                 if (swSocket_wait(task_notify_pipe->getFd(task_notify_pipe, 1), -1, SW_EVENT_WRITE) == 0)
                 {

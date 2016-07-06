@@ -55,7 +55,7 @@ swString *swString_dup2(swString *src)
     return dst;
 }
 
-swString *swString_dup(char *src_str, int length)
+swString *swString_dup(const char *src_str, int length)
 {
     swString *str = sw_malloc(sizeof(swString));
     if (str == NULL)
@@ -78,12 +78,6 @@ swString *swString_dup(char *src_str, int length)
     return str;
 }
 
-void swString_free(swString *str)
-{
-    sw_free(str->str);
-    sw_free(str);
-}
-
 int swString_append(swString *str, swString *append_str)
 {
     int new_size = str->length + append_str->length;
@@ -96,6 +90,25 @@ int swString_append(swString *str, swString *append_str)
     }
     memcpy(str->str + str->length, append_str->str, append_str->length);
     str->length += append_str->length;
+    return SW_OK;
+}
+
+int swString_append_int(swString *str, int value)
+{
+    char buf[16];
+    int s_len = swoole_itoa(buf, value);
+
+    int new_size = str->length + s_len;
+    if (new_size > str->size)
+    {
+        if (swString_extend(str, swoole_size_align(new_size * 2, sysconf(_SC_PAGESIZE))) < 0)
+        {
+            return SW_ERR;
+        }
+    }
+
+    memcpy(str->str + str->length, buf, s_len);
+    str->length += s_len;
     return SW_OK;
 }
 
@@ -116,13 +129,14 @@ int swString_append_ptr(swString *str, char *append_str, int length)
 
 int swString_extend(swString *str, size_t new_size)
 {
-    assert (new_size > str->size);
-    str->str = sw_realloc(str->str, new_size);
-    if (str->str == NULL)
+    assert(new_size > str->size);
+    char *new_str = sw_realloc(str->str, new_size);
+    if (new_str == NULL)
     {
         swSysError("realloc(%ld) failed.", new_size);
         return SW_ERR;
     }
+    str->str = new_str;
     str->size = new_size;
     return SW_OK;
 }

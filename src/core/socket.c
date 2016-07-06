@@ -44,6 +44,7 @@ int swSocket_sendfile_sync(int sock, char *filename, double timeout)
     {
         if (swSocket_wait(sock, timeout_ms, SW_EVENT_WRITE) < 0)
         {
+            close(file_fd);
             return SW_ERR;
         }
         else
@@ -52,7 +53,8 @@ int swSocket_sendfile_sync(int sock, char *filename, double timeout)
             n = swoole_sendfile(sock, file_fd, &offset, sendn);
             if (n <= 0)
             {
-                swWarn("sendfile() failed. Error: %s[%d]", strerror(errno), errno);
+                close(file_fd);
+                swSysError("sendfile(%d, %s) failed.", sock, filename);
                 return SW_ERR;
             }
             else
@@ -61,16 +63,17 @@ int swSocket_sendfile_sync(int sock, char *filename, double timeout)
             }
         }
     }
+    close(file_fd);
     return SW_OK;
 }
 
 /**
  * clear socket buffer.
  */
-void swSocket_clean(int fd, void *buf, int len)
+void swSocket_clean(int fd)
 {
-    while (recv(fd, buf, len, MSG_DONTWAIT) > 0)
-        ;
+    char buf[2048];
+    while (recv(fd, buf, sizeof(buf), MSG_DONTWAIT) > 0);
 }
 
 /**
@@ -124,7 +127,11 @@ int swSocket_write_blocking(int __fd, void *__data, int __len)
             {
                 continue;
             }
+#ifdef HAVE_KQUEUE
+            else if (errno == EAGAIN || errno == ENOBUFS)
+#else
             else if (errno == EAGAIN)
+#endif
             {
                 swSocket_wait(__fd, SW_WORKER_WAIT_TIMEOUT, SW_EVENT_WRITE);
                 continue;
@@ -232,31 +239,26 @@ int swSocket_create(int type)
         _type = SOCK_STREAM;
         break;
     default:
+        swWarn("unknown socket type [%d]", type);
         return SW_ERR;
     }
     return socket(_domain, _type, 0);
 }
 
-int swSocket_listen(int type, char *host, int port, int backlog)
+int swSocket_bind(int sock, int type, char *host, int port)
 {
-    int sock;
-    int option;
     int ret;
 
     struct sockaddr_in addr_in4;
     struct sockaddr_in6 addr_in6;
     struct sockaddr_un addr_un;
 
-    sock = swSocket_create(type);
-    if (sock < 0)
+    //SO_REUSEADDR option
+    int option = 1;
+    if (setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &option, sizeof(int)) < 0)
     {
-        swWarn("create socket failed. Error: %s[%d]", strerror(errno), errno);
-        return SW_ERR;
+        swSysError("setsockopt(%d, SO_REUSEADDR) failed.", sock);
     }
-    //reuse
-    option = 1;
-    setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &option, sizeof(int));
-
     //unix socket
     if (type == SW_SOCK_UNIX_DGRAM || type == SW_SOCK_UNIX_STREAM)
     {
@@ -290,17 +292,41 @@ int swSocket_listen(int type, char *host, int port, int backlog)
         swWarn("bind(%s:%d) failed. Error: %s [%d]", host, port, strerror(errno), errno);
         return SW_ERR;
     }
-    if (type == SW_SOCK_UDP || type == SW_SOCK_UDP6 || type == SW_SOCK_UNIX_DGRAM)
+    return ret;
+}
+
+int swSocket_set_buffer_size(int fd, int buffer_size)
+{
+    if (setsockopt(fd, SOL_SOCKET, SO_SNDBUF, &buffer_size, sizeof(buffer_size)) < 0)
     {
-        return sock;
-    }
-    //listen stream socket
-    ret = listen(sock, backlog);
-    if (ret < 0)
-    {
-        swWarn("listen(%d) failed. Error: %s[%d]", backlog, strerror(errno), errno);
+        swSysError("setsockopt(%d, SOL_SOCKET, SO_SNDBUF, %d) failed.", fd, buffer_size);
         return SW_ERR;
     }
-    swSetNonBlock(sock);
-    return sock;
+    if (setsockopt(fd, SOL_SOCKET, SO_RCVBUF, &buffer_size, sizeof(buffer_size)) < 0)
+    {
+        swSysError("setsockopt(%d, SOL_SOCKET, SO_RCVBUF, %d) failed.", fd, buffer_size);
+        return SW_ERR;
+    }
+    return SW_OK;
+}
+
+int swSocket_set_timeout(int sock, double timeout)
+{
+    int ret;
+    struct timeval timeo;
+    timeo.tv_sec = (int) timeout;
+    timeo.tv_usec = (int) ((timeout - timeo.tv_sec) * 1000 * 1000);
+    ret = setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, (void *) &timeo, sizeof(timeo));
+    if (ret < 0)
+    {
+        swWarn("setsockopt(SO_SNDTIMEO) failed. Error: %s[%d]", strerror(errno), errno);
+        return SW_ERR;
+    }
+    ret = setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, (void *) &timeo, sizeof(timeo));
+    if (ret < 0)
+    {
+        swWarn("setsockopt(SO_RCVTIMEO) failed. Error: %s[%d]", strerror(errno), errno);
+        return SW_ERR;
+    }
+    return SW_OK;
 }
