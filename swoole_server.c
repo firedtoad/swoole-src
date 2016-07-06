@@ -2019,7 +2019,7 @@ PHP_METHOD(swoole_server, close)
     }
 
     swServer *serv = swoole_get_object(zobject);
-    swConnection *conn = swServer_connection_verify(serv, fd);
+    swConnection *conn = swServer_connection_verify_no_ssl(serv, fd);
     if (!conn)
     {
         RETURN_FALSE;
@@ -2648,6 +2648,7 @@ PHP_METHOD(swoole_server, connection_info)
         add_assoc_long(return_value, "from_id", conn->from_id);
         add_assoc_long(return_value, "connect_time", conn->connect_time);
         add_assoc_long(return_value, "last_time", conn->last_time);
+        add_assoc_long(return_value, "close_errno", conn->close_errno);
     }
 }
 
