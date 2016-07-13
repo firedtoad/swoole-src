@@ -13,11 +13,9 @@
   | Author: Tianfeng Han  <mikan.tenny@gmail.com>                        |
   +----------------------------------------------------------------------+
 */
-
-/* $Id: swoole.c 2013-12-24 10:31:55Z tianfeng $ */
-
 #include "php_swoole.h"
 #include "zend_variables.h"
+#include "module.h"
 
 #include <netinet/in.h>
 #include <arpa/inet.h>
@@ -109,6 +107,12 @@ ZEND_BEGIN_ARG_INFO_EX(arginfo_swoole_server_taskwait_oo, 0, 0, 1)
     ZEND_ARG_INFO(0, timeout)
     ZEND_ARG_INFO(0, worker_id)
 ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_INFO_EX(arginfo_swoole_server_taskWaitMulti_oo, 0, 0, 1)
+    ZEND_ARG_INFO(0, tasks)
+    ZEND_ARG_INFO(0, timeout)
+ZEND_END_ARG_INFO()
+
 
 ZEND_BEGIN_ARG_INFO_EX(arginfo_swoole_server_finish_oo, 0, 0, 1)
     ZEND_ARG_INFO(0, data)
@@ -258,6 +262,7 @@ const zend_function_entry swoole_functions[] =
     PHP_FE(swoole_get_local_ip, arginfo_swoole_void)
     PHP_FE(swoole_strerror, arginfo_swoole_strerror)
     PHP_FE(swoole_errno, arginfo_swoole_void)
+    PHP_FE(swoole_load_module, NULL)
     PHP_FE_END /* Must be the last line in swoole_functions[] */
 };
 
@@ -277,6 +282,7 @@ static zend_function_entry swoole_server_methods[] = {
     PHP_ME(swoole_server, close, arginfo_swoole_server_close_oo, ZEND_ACC_PUBLIC)
     PHP_ME(swoole_server, task, arginfo_swoole_server_task_oo, ZEND_ACC_PUBLIC)
     PHP_ME(swoole_server, taskwait, arginfo_swoole_server_taskwait_oo, ZEND_ACC_PUBLIC)
+    PHP_ME(swoole_server, taskWaitMulti, arginfo_swoole_server_taskWaitMulti_oo, ZEND_ACC_PUBLIC)
     PHP_ME(swoole_server, finish, arginfo_swoole_server_finish_oo, ZEND_ACC_PUBLIC)
     PHP_ME(swoole_server, reload, arginfo_swoole_server_reload_oo, ZEND_ACC_PUBLIC)
     PHP_ME(swoole_server, shutdown, arginfo_swoole_void, ZEND_ACC_PUBLIC)
@@ -326,6 +332,18 @@ static const zend_function_entry swoole_timer_methods[] =
     PHP_FE_END
 };
 
+static const zend_function_entry swoole_event_methods[] =
+{
+    ZEND_FENTRY(add, ZEND_FN(swoole_event_add), arginfo_swoole_event_add, ZEND_ACC_PUBLIC | ZEND_ACC_STATIC)
+    ZEND_FENTRY(del, ZEND_FN(swoole_event_del), arginfo_swoole_event_del, ZEND_ACC_PUBLIC | ZEND_ACC_STATIC)
+    ZEND_FENTRY(set, ZEND_FN(swoole_event_set), arginfo_swoole_void, ZEND_ACC_PUBLIC | ZEND_ACC_STATIC)
+    ZEND_FENTRY(exit, ZEND_FN(swoole_event_exit), arginfo_swoole_void, ZEND_ACC_PUBLIC | ZEND_ACC_STATIC)
+    ZEND_FENTRY(write, ZEND_FN(swoole_event_write), arginfo_swoole_event_write, ZEND_ACC_PUBLIC | ZEND_ACC_STATIC)
+    ZEND_FENTRY(wait, ZEND_FN(swoole_event_wait), arginfo_swoole_void, ZEND_ACC_PUBLIC | ZEND_ACC_STATIC)
+    ZEND_FENTRY(defer, ZEND_FN(swoole_event_defer), arginfo_swoole_event_defer, ZEND_ACC_PUBLIC | ZEND_ACC_STATIC)
+    PHP_FE_END
+};
+
 #if PHP_MEMORY_DEBUG
 php_vmstat_t php_vmstat;
 #endif
@@ -338,6 +356,9 @@ zend_class_entry *swoole_connection_iterator_class_entry_ptr;
 
 zend_class_entry swoole_timer_ce;
 zend_class_entry *swoole_timer_class_entry_ptr;
+
+zend_class_entry swoole_event_ce;
+zend_class_entry *swoole_event_class_entry_ptr;
 
 zend_module_entry swoole_module_entry =
 {
@@ -566,6 +587,9 @@ PHP_MINIT_FUNCTION(swoole)
     SWOOLE_INIT_CLASS_ENTRY(swoole_timer_ce, "swoole_timer", "Swoole\\Timer", swoole_timer_methods);
     swoole_timer_class_entry_ptr = zend_register_internal_class(&swoole_timer_ce TSRMLS_CC);
 
+    SWOOLE_INIT_CLASS_ENTRY(swoole_event_ce, "swoole_event", "Swoole\\Event", swoole_event_methods);
+    swoole_event_class_entry_ptr = zend_register_internal_class(&swoole_event_ce TSRMLS_CC);
+
 #ifdef HAVE_PCRE
     SWOOLE_INIT_CLASS_ENTRY(swoole_connection_iterator_ce, "swoole_connection_iterator", "Swoole\\ConnectionIterator",  swoole_connection_iterator_methods);
     swoole_connection_iterator_class_entry_ptr = zend_register_internal_class(&swoole_connection_iterator_ce TSRMLS_CC);
@@ -586,6 +610,7 @@ PHP_MINIT_FUNCTION(swoole)
     swoole_buffer_init(module_number TSRMLS_CC);
     swoole_websocket_init(module_number TSRMLS_CC);
     swoole_mysql_init(module_number TSRMLS_CC);
+    swoole_module_init(module_number TSRMLS_CC);
 
 #ifdef SW_USE_REDIS
     swoole_redis_init(module_number TSRMLS_CC);
@@ -619,6 +644,8 @@ PHP_MINIT_FUNCTION(swoole)
 
     return SUCCESS;
 }
+
+
 /* }}} */
 
 /* {{{ PHP_MINFO_FUNCTION

@@ -102,6 +102,7 @@ enum swTaskType
     SW_TASK_SERIALIZE  = 2,  //php serialize
     SW_TASK_NONBLOCK   = 4,  //task
     SW_TASK_CALLBACK   = 8,  //callback
+    SW_TASK_WAITALL    = 16, //for taskWaitAll
 };
 
 typedef struct _swUdpFd
@@ -518,7 +519,7 @@ static sw_inline void swServer_free_buffer(swServer *serv, int fd)
 static sw_inline swListenPort* swServer_get_port(swServer *serv, int fd)
 {
     int server_fd = serv->connection_list[fd].from_fd;
-    return serv->connection_list[server_fd].object;
+    return (swListenPort*) serv->connection_list[server_fd].object;
 }
 
 int swServer_udp_send(swServer *serv, swSendData *resp);
