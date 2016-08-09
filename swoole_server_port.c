@@ -44,6 +44,7 @@ void swoole_server_port_init(int module_number TSRMLS_DC)
 {
     SWOOLE_INIT_CLASS_ENTRY(swoole_server_port_ce, "swoole_server_port", "Swoole\\Server\\Port", swoole_server_port_methods);
     swoole_server_port_class_entry_ptr = zend_register_internal_class(&swoole_server_port_ce TSRMLS_CC);
+    SWOOLE_CLASS_ALIAS(swoole_server_port, "Swoole\\Server\\Port");
 }
 
 static PHP_METHOD(swoole_server_port, __construct)
@@ -88,6 +89,11 @@ static PHP_METHOD(swoole_server_port, set)
     {
         convert_to_long(v);
         port->backlog = (int) Z_LVAL_P(v);
+    }
+    if (php_swoole_array_get_value(vht, "socket_buffer_size", v))
+    {
+        convert_to_long(v);
+        port->socket_buffer_size = (int) Z_LVAL_P(v);
     }
     //tcp_nodelay
     if (php_swoole_array_get_value(vht, "open_tcp_nodelay", v))
@@ -341,22 +347,40 @@ static PHP_METHOD(swoole_server_port, on)
         port->ptr = property;
     }
 
-    char *callback[PHP_SERVER_PORT_CALLBACK_NUM] = {
+    char *callback_name[PHP_SERVER_CALLBACK_NUM] = {
         "Connect",
         "Receive",
         "Close",
         "Packet",
+        "Start",
+        NULL,
+        NULL,
+        NULL,
+        NULL,
+        NULL,
+        NULL,
+        NULL,
+        NULL,
+        NULL,
+        "Request",
+        "HandShake",
+        "Open",
+        "Message",
     };
 
     char property_name[128];
     int l_property_name = 0;
     memcpy(property_name, "on", 2);
 
-    for (i = 0; i < PHP_SERVER_PORT_CALLBACK_NUM; i++)
+    for (i = 0; i < PHP_SERVER_CALLBACK_NUM; i++)
     {
-        if (strncasecmp(callback[i], name, len) == 0)
+        if (callback_name[i] == NULL)
         {
-            memcpy(property_name + 2, callback[i], len);
+            continue;
+        }
+        if (strncasecmp(callback_name[i], name, len) == 0)
+        {
+            memcpy(property_name + 2, callback_name[i], len);
             l_property_name = len + 2;
             property_name[l_property_name] = '\0';
             zend_update_property(swoole_server_port_class_entry_ptr, getThis(), property_name, l_property_name, cb TSRMLS_CC);
@@ -393,5 +417,7 @@ static PHP_METHOD(swoole_server_port, getSocket)
         RETURN_FALSE;
     }
     SW_ZEND_REGISTER_RESOURCE(return_value, (void *) socket_object, php_sockets_le_socket());
+    zval *zsocket = sw_zval_dup(return_value);
+    sw_zval_add_ref(&zsocket);
 }
 #endif

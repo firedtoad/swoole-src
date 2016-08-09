@@ -30,22 +30,25 @@ PHP_ARG_ENABLE(openssl, enable openssl support,
 [  --enable-openssl        Use openssl?], no, no)
 
 PHP_ARG_ENABLE(http2, enable http2.0 support,
-[  --enable-http2        Use http2.0?], no, no)
+[  --enable-http2          Use http2.0?], no, no)
 
 PHP_ARG_ENABLE(thread, enable thread support,
-[  --enable-thread       Use thread?], no, no)
+[  --enable-thread         Use thread?], no, no)
 
 PHP_ARG_ENABLE(jemalloc, enable jemalloc support,
-[  --enable-jemalloc        Use jemalloc?], no, no)
+[  --enable-jemalloc       Use jemalloc?], no, no)
 
 PHP_ARG_ENABLE(tcmalloc, enable tcmalloc support,
-[  --enable-tcmalloc        Use tcmalloc?], no, no)
+[  --enable-tcmalloc       Use tcmalloc?], no, no)
+
+PHP_ARG_ENABLE(swoole, swoole support,
+[  --enable-swoole         Enable swoole support], [enable_swoole="yes"])
 
 PHP_ARG_WITH(swoole, swoole support,
 [  --with-swoole           With swoole support])
 
-PHP_ARG_ENABLE(swoole, swoole support,
-[  --enable-swoole         Enable swoole support], [enable_swoole="yes"])
+PHP_ARG_WITH(openssl_dir, for OpenSSL support,
+[  --with-openssl[=DIR]    Include OpenSSL support (requires OpenSSL >= 0.9.6)], no, no)
 
 AC_DEFUN([SWOOLE_HAVE_PHP_EXT], [
     extname=$1
@@ -187,24 +190,29 @@ if test "$PHP_SWOOLE" != "no"; then
     ])
 
     if test `uname` = "Darwin"; then
-        AC_CHECK_LIB(c, clock_gettime, AC_DEFINE(HAVE_CLOCK_GETTIME, 1, [have clock_gettime]))     
-        if test "$PHP_OPENSSL" = "yes"; then
-            AC_DEFINE(SW_USE_OPENSSL, 1, [enable openssl support])
-            PHP_ADD_LIBRARY(ssl, 1, SWOOLE_SHARED_LIBADD)
-            PHP_ADD_LIBRARY(mcrypt, 1, SWOOLE_SHARED_LIBADD)
-            PHP_ADD_LIBRARY(crypto, 1, SWOOLE_SHARED_LIBADD)
-        fi
+        AC_CHECK_LIB(c, clock_gettime, AC_DEFINE(HAVE_CLOCK_GETTIME, 1, [have clock_gettime]))
     else
         AC_CHECK_LIB(rt, clock_gettime, AC_DEFINE(HAVE_CLOCK_GETTIME, 1, [have clock_gettime]))
         PHP_ADD_LIBRARY(rt, 1, SWOOLE_SHARED_LIBADD)
-
-        if test "$PHP_OPENSSL" = "yes"; then
-            AC_DEFINE(SW_USE_OPENSSL, 1, [enable openssl support])
-            PHP_ADD_LIBRARY(ssl, 1, SWOOLE_SHARED_LIBADD)
-            PHP_ADD_LIBRARY(crypt, 1, SWOOLE_SHARED_LIBADD)
-            PHP_ADD_LIBRARY(crypto, 1, SWOOLE_SHARED_LIBADD)
-        fi
     fi
+
+
+    if test "$PHP_OPENSSL" != "no" || test "$PHP_OPENSSL_DIR" != "no"; then
+        if test "$PHP_OPENSSL_DIR" != "no"; then
+            PHP_ADD_INCLUDE("${PHP_OPENSSL_DIR}/include")
+            PHP_ADD_LIBRARY_WITH_PATH(ssl, "${PHP_OPENSSL_DIR}/lib")
+        fi
+    
+        AC_DEFINE(SW_USE_OPENSSL, 1, [enable openssl support])
+        PHP_ADD_LIBRARY(ssl, 1, SWOOLE_SHARED_LIBADD)
+        if test `uname` = "Darwin"; then
+            PHP_ADD_LIBRARY(mcrypt, 1, SWOOLE_SHARED_LIBADD)
+        else
+            PHP_ADD_LIBRARY(crypt, 1, SWOOLE_SHARED_LIBADD)
+        fi
+        PHP_ADD_LIBRARY(crypto, 1, SWOOLE_SHARED_LIBADD)
+    fi
+
 
     PHP_ADD_LIBRARY(pthread, 1, SWOOLE_SHARED_LIBADD)
 
@@ -302,6 +310,8 @@ if test "$PHP_SWOOLE" != "no"; then
         src/protocol/Http2.c \
         src/protocol/WebSocket.c \
         src/protocol/Mqtt.c \
+        src/protocol/Socks5.c \
+        src/protocol/MimeTypes.c \
         src/protocol/Base64.c"
 
     swoole_source_file="$swoole_source_file thirdparty/php_http_parser.c"
@@ -309,6 +319,7 @@ if test "$PHP_SWOOLE" != "no"; then
 
     PHP_NEW_EXTENSION(swoole, $swoole_source_file, $ext_shared)
 
+    PHP_ADD_INCLUDE([$ext_srcdir])
     PHP_ADD_INCLUDE([$ext_srcdir/include])
 
     PHP_ADD_BUILD_DIR($ext_builddir/src/core)

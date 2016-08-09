@@ -227,6 +227,8 @@
 #define SW_HTTP_COOKIE_VALLEN            4096
 #define SW_HTTP_RESPONSE_INIT_SIZE       65536
 #define SW_HTTP_HEADER_MAX_SIZE          8192
+#define SW_HTTP_HEADER_KEY_SIZE          128
+#define SW_HTTP_HEADER_VALUE_SIZE        4096
 #define SW_HTTP_COMPRESS_GZIP
 #define SW_HTTP_UPLOAD_TMP_FILE          "/tmp/swoole.upfile.XXXXXX"
 #define SW_HTTP_DATE_FORMAT              "D, d M Y H:i:s T"
@@ -237,6 +239,9 @@
 #define SW_HTTP2_MAX_WINDOW              ((1u << 31) - 1)
 
 #define SW_HTTP_CLIENT_USERAGENT         "swoole-http-client"
+#define SW_HTTP_CLIENT_BOUNDARY_PREKEY   "----SwooleBoundary"
+#define SW_HTTP_FORM_DATA_FORMAT_STRING  "--%*s\r\nContent-Disposition: form-data; name=\"%*s\"\r\n\r\n"
+#define SW_HTTP_FORM_DATA_FORMAT_FILE    "--%*s\r\nContent-Disposition: form-data; name=\"%*s\"; filename=\"%*s\"\r\nContent-Type: %*s\r\n\r\n"
 
 #define SW_WEBSOCKET_SERVER_SOFTWARE     "swoole-websocket-server"
 #define SW_WEBSOCKET_VERSION             "13"

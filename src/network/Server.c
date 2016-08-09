@@ -95,7 +95,7 @@ int swServer_master_onAccept(swReactor *reactor, swEvent *event)
     socklen_t client_addrlen = sizeof(client_addr);
     swListenPort *listen_host = serv->connection_list[event->fd].object;
 
-    int new_fd = 0, ret, reactor_id = 0, i;
+    int new_fd = 0, ret = 0, reactor_id = 0, i;
 
     //SW_ACCEPT_AGAIN
     for (i = 0; i < SW_ACCEPT_MAX_COUNT; i++)
@@ -189,7 +189,10 @@ int swServer_master_onAccept(swReactor *reactor, swEvent *event)
         }
         else
         {
-            ret = sub_reactor->add(sub_reactor, new_fd, SW_FD_TCP | SW_EVENT_READ);
+            if (!serv->enable_delay_receive)
+            {
+                ret = sub_reactor->add(sub_reactor, new_fd, SW_FD_TCP | SW_EVENT_READ);
+            }
             if (ret >= 0 && serv->onConnect && !listen_host->ssl)
             {
                 swServer_connection_ready(serv, new_fd, reactor->id);
@@ -831,6 +834,30 @@ int swServer_udp_send(swServer *serv, swSendData *resp)
     return ret;
 }
 
+int swServer_confirm(swServer *serv, int fd)
+{
+    swConnection *conn = swServer_connection_verify(serv, fd);
+    if (!conn && !conn->listen_wait)
+    {
+        return SW_ERR;
+    }
+
+    swSendData _send;
+    bzero(&_send, sizeof(_send));
+    _send.info.type = SW_EVENT_CONFIRM;
+    _send.info.fd = fd;
+    _send.info.from_id = conn->from_id;
+
+    if (serv->factory_mode == SW_MODE_PROCESS)
+    {
+        return swWorker_send2reactor((swEventData *) &_send.info, sizeof(_send.info), fd);
+    }
+    else
+    {
+        return swReactorThread_send(&_send);
+    }
+}
+
 void swServer_store_pipe_fd(swServer *serv, swPipe *p)
 {
     int master_fd = p->getFd(p, SW_PIPE_MASTER);
@@ -1295,6 +1322,7 @@ static swConnection* swServer_connection_new(swServer *serv, swListenPort *ls, i
     connection->connect_time = SwooleGS->now;
     connection->last_time = SwooleGS->now;
     connection->active = 1;
+    connection->buffer_size = ls->socket_buffer_size;
 
 #ifdef SW_REACTOR_SYNC_SEND
     if (serv->factory_mode != SW_MODE_THREAD && !ls->ssl)

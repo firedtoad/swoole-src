@@ -130,6 +130,7 @@ void swoole_redis_init(int module_number TSRMLS_DC)
 {
     SWOOLE_INIT_CLASS_ENTRY(swoole_redis_ce, "swoole_redis", "Swoole\\Redis", swoole_redis_methods);
     swoole_redis_class_entry_ptr = zend_register_internal_class(&swoole_redis_ce TSRMLS_CC);
+    SWOOLE_CLASS_ALIAS(swoole_redis, "Swoole\\Redis");
 }
 
 static PHP_METHOD(swoole_redis, __construct)
@@ -199,14 +200,23 @@ static PHP_METHOD(swoole_redis, connect)
         RETURN_FALSE;
     }
 
-    if (port <= 1 || port > 65535)
+    swRedisClient *redis = swoole_get_object(getThis());
+    redisAsyncContext *context;
+
+    if (strncasecmp(host, ZEND_STRL("unix:/")) == 0)
     {
-        swoole_php_error(E_WARNING, "port is invalid.");
-        RETURN_FALSE;
+        context = redisAsyncConnectUnix(host + 5);
+    }
+    else
+    {
+        if (port <= 1 || port > 65535)
+        {
+            swoole_php_error(E_WARNING, "port is invalid.");
+            RETURN_FALSE;
+        }
+        context = redisAsyncConnect(host, (int) port);
     }
 
-    swRedisClient *redis = swoole_get_object(getThis());
-    redisAsyncContext *context = redisAsyncConnect(host, (int) port);
     if (context->err)
     {
         swoole_php_error(E_WARNING, "connect to redis-server[%s:%d] failed, Erorr: %s[%d]", host, (int) port, context->errstr, context->err);
@@ -290,6 +300,12 @@ static PHP_METHOD(swoole_redis, __call)
     if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "sz", &command, &command_len, &params) == FAILURE)
     {
         return;
+    }
+
+    if (Z_TYPE_P(params) != IS_ARRAY)
+    {
+        swoole_php_fatal_error(E_WARNING, "invalid params.");
+        RETURN_FALSE;
     }
 
     swRedisClient *redis = swoole_get_object(getThis());
