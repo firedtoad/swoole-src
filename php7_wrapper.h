@@ -52,10 +52,12 @@ static inline int sw_zend_hash_find(HashTable *ht, char *k, int len, void **v)
 #define sw_smart_str                          smart_str
 #define sw_php_var_unserialize                php_var_unserialize
 #define sw_zend_is_callable                   zend_is_callable
+#define sw_zend_is_callable_ex                zend_is_callable_ex
 #define sw_zend_hash_add                      zend_hash_add
 #define sw_zend_hash_index_update             zend_hash_index_update
 #define sw_call_user_function_ex              call_user_function_ex
 #define sw_copy_to_stack(a, b)
+#define SW_GET_TSRMLS                         TSRMLS_FETCH_FROM_CTX(sw_thread_ctx ? sw_thread_ctx : NULL)
 
 //----------------------------------Array API------------------------------------
 #define sw_add_assoc_string                   add_assoc_string
@@ -69,6 +71,7 @@ static inline int sw_zend_hash_find(HashTable *ht, char *k, int len, void **v)
 #define sw_zend_hash_copy                     zend_hash_copy
 #define sw_zval_add_ref                       zval_add_ref
 #define sw_zval_dup(val)                      (val)
+#define sw_zval_free(val)                     (sw_zval_ptr_dtor(&val))
 #define sw_zend_hash_exists                   zend_hash_exists
 #define sw_php_format_date                    php_format_date
 #define sw_php_url_encode                     php_url_encode
@@ -249,6 +252,7 @@ static sw_inline int sw_call_user_function_ex(HashTable *function_table, zval** 
 #define sw_zend_call_method_with_1_params(obj, ptr, what, method, retval, v1)           zend_call_method_with_1_params(*obj,ptr,what,method,*retval,v1)
 #define sw_zend_call_method_with_2_params(obj, ptr, what, method, retval, name, cb)     zend_call_method_with_2_params(*obj,ptr,what,method,*retval,name,cb)
 
+#define SW_GET_TSRMLS
 #define SW_ZVAL_STRINGL(z, s, l, dup)         ZVAL_STRINGL(z, s, l)
 #define SW_ZVAL_STRING(z,s,dup)               ZVAL_STRING(z,s)
 #define sw_smart_str                          smart_string
@@ -257,7 +261,7 @@ static sw_inline int sw_call_user_function_ex(HashTable *function_table, zval** 
     a = &b;\
     memcpy(a, __tmp, sizeof(zval));}
 
-static inline zval* sw_zval_dup(zval *val)
+static sw_inline zval* sw_zval_dup(zval *val)
 {
     zval *dup;
     SW_ALLOC_INIT_ZVAL(dup);
@@ -265,13 +269,21 @@ static inline zval* sw_zval_dup(zval *val)
     return dup;
 }
 
-static inline zval* sw_zend_read_property(zend_class_entry *class_ptr, zval *obj, char *s, int len, int silent)
+static sw_inline void sw_zval_free(zval *val)
+{
+    sw_zval_ptr_dtor(&val);
+#if PHP_MAJOR_VERSION > 5
+    efree(val);
+#endif
+}
+
+static sw_inline zval* sw_zend_read_property(zend_class_entry *class_ptr, zval *obj, char *s, int len, int silent)
 {
     zval rv;
     return zend_read_property(class_ptr, obj, s, len, silent, &rv);
 }
 
-static inline int sw_zend_is_callable(zval *cb, int a, char **name)
+static sw_inline int sw_zend_is_callable(zval *cb, int a, char **name)
 {
     zend_string *key = NULL;
     int ret = zend_is_callable(cb, a, &key);
@@ -279,6 +291,17 @@ static inline int sw_zend_is_callable(zval *cb, int a, char **name)
     memcpy(tmp, key->val, key->len);
     zend_string_release(key);
     *name = tmp;
+    return ret;
+}
+
+static inline int sw_zend_is_callable_ex(zval *callable, zval *object, uint check_flags, char **callable_name, int *callable_name_len, zend_fcall_info_cache *fcc, char **error TSRMLS_DC)
+{
+    zend_string *key = NULL;
+    char *tmp = (char *)emalloc(key->len);
+    int ret = zend_is_callable_ex(callable, NULL, check_flags, &key, fcc, error);
+    memcpy(tmp, key->val, key->len);
+    zend_string_release(key);
+    *callable_name = tmp;
     return ret;
 }
 

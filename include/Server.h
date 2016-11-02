@@ -61,11 +61,10 @@ enum swEventType
     SW_EVENT_CONFIRM         = 18,
 };
 
-enum swIPCMode
+enum swIPCType
 {
-	SW_IPC_UNSOCK   = 1,
-	SW_IPC_MSGQUEUE = 2,
-	SW_IPC_CHANNEL  = 3,
+    SW_IPC_UNIXSOCK = 1,
+    SW_IPC_MSGQUEUE = 2,
 };
 
 enum swTaskIPCMode
@@ -182,6 +181,10 @@ typedef struct _swListenPort
      */
     uint32_t open_mqtt_protocol :1;
     /**
+     *  redis protocol
+     */
+    uint32_t open_redis_protocol :1;
+    /**
      * open tcp nodelay option
      */
     uint32_t open_tcp_nodelay :1;
@@ -268,6 +271,8 @@ typedef struct _swRequest
     void *object;
 } swRequest;
 
+typedef int (*swServer_dispatch_function)(swServer *, swConnection *, char *, uint32_t);
+
 int swFactory_create(swFactory *factory);
 int swFactory_start(swFactory *factory);
 int swFactory_shutdown(swFactory *factory);
@@ -310,7 +315,8 @@ struct _swServer
     /**
      * package dispatch mode
      */
-    uint8_t dispatch_mode; //分配模式，1平均分配，2按FD取摸固定分配，3,使用抢占式队列(IPC消息队列)分配
+    uint8_t dispatch_mode;
+
 
     int worker_uid;
     int worker_groupid;
@@ -426,6 +432,11 @@ struct _swServer
     swSession *session_list;
 
     /**
+     * temporary directory for HTTP uploaded file.
+     */
+    char *upload_tmp_dir;
+
+    /**
      * message queue key
      */
     uint64_t message_queue_key;
@@ -455,7 +466,11 @@ struct _swServer
     int (*onTask)(swServer *serv, swEventData *data);
     int (*onFinish)(swServer *serv, swEventData *data);
 
-    int (*send)(swServer *, swSendData *);
+    int (*send)(swServer *serv, int fd, void *data, uint32_t length);
+    int (*sendfile)(swServer *serv, int fd, char *filename, uint32_t length, off_t offset);
+    int (*sendwait)(swServer *serv, int fd, void *data, uint32_t length);
+    int (*close)(swServer *serv, int fd, int reset);
+    int (*dispatch_func)(swServer *, swConnection *, char *, uint32_t);
 };
 
 typedef struct _swSocketLocal
@@ -532,7 +547,8 @@ static sw_inline swListenPort* swServer_get_port(swServer *serv, int fd)
 int swServer_udp_send(swServer *serv, swSendData *resp);
 int swServer_tcp_send(swServer *serv, int fd, void *data, uint32_t length);
 int swServer_tcp_sendwait(swServer *serv, int fd, void *data, uint32_t length);
-int swServer_tcp_sendfile(swServer *serv, int fd, char *filename, uint32_t len);
+int swServer_tcp_close(swServer *serv, int fd, int reset);
+int swServer_tcp_sendfile(swServer *serv, int fd, char *filename, uint32_t len, off_t offset);
 int swServer_confirm(swServer *serv, int fd);
 
 //UDP, UDP必然超过0x1000000
@@ -579,6 +595,7 @@ int swServer_get_manager_pid(swServer *serv);
 int swServer_get_socket(swServer *serv, int port);
 int swServer_worker_init(swServer *serv, swWorker *worker);
 swString** swServer_create_worker_buffer(swServer *serv);
+int swServer_create_task_worker(swServer *serv);
 void swServer_close_listen_port(swServer *serv);
 void swServer_enable_accept(swReactor *reactor);
 
@@ -602,11 +619,11 @@ int swTaskWorker_finish(swServer *serv, char *data, int data_len, int flags);
     if (_length > SwooleG.serv->listen_list->protocol.package_max_length) {\
         swoole_error_log(SW_LOG_WARNING, SW_ERROR_TASK_PACKAGE_TOO_BIG, "task package[length=%d] is too big.", _length);\
     }\
-    _buf = __malloc(_length + 1);\
+    _buf = (char *)__malloc(_length + 1);\
     _buf[_length] = 0;\
     int tmp_file_fd = open(_pkg.tmpfile, O_RDONLY);\
     if (tmp_file_fd < 0){\
-        swSysError("open(%s) failed.", task->data);\
+        swSysError("open(%s) failed.", _pkg.tmpfile);\
         _length = -1;\
     } else if (swoole_sync_readfile(tmp_file_fd, _buf, _length) > 0) {\
         close(tmp_file_fd);\
@@ -835,7 +852,10 @@ static sw_inline void swServer_connection_ready(swServer *serv, int fd, int reac
 void swPort_init(swListenPort *port);
 void swPort_free(swListenPort *port);
 void swPort_set_protocol(swListenPort *ls);
-int swPort_set_option(swListenPort *ls);
+int swPort_listen(swListenPort *ls);
+#ifdef SW_USE_OPENSSL
+int swPort_enable_ssl_encrypt(swListenPort *ls);
+#endif
 
 void swWorker_free(swWorker *worker);
 void swWorker_onStart(swServer *serv);

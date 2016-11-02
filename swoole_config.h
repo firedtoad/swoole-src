@@ -76,9 +76,10 @@
 #endif
 //!!!End.-------------------------------------------------------------------
 
+#define SW_BUFFER_SIZE_STD         8192
 #define SW_BUFFER_SIZE_BIG         65536
 #define SW_BUFFER_SIZE_UDP         65536
-#define SW_SENDFILE_TRUNK          65536
+#define SW_SENDFILE_CHUNK_SIZE     65536
 
 #define SW_SENDFILE_MAXLEN         4194304
 
@@ -109,7 +110,7 @@
 #define SW_THREADPOOL_QUEUE_LEN          10000
 #define SW_IP_MAX_LENGTH                 32
 
-#define SW_USE_WRITER_THREAD       0    //使用单独的发送线程
+//#define SW_USE_SOCKET_LINGER
 
 #define SW_WORKER_SENDTO_COUNT     32    //写回客户端失败尝试次数
 #define SW_WORKER_SENDTO_YIELD     10   //yield after sendto
@@ -230,7 +231,7 @@
 #define SW_HTTP_HEADER_KEY_SIZE          128
 #define SW_HTTP_HEADER_VALUE_SIZE        4096
 #define SW_HTTP_COMPRESS_GZIP
-#define SW_HTTP_UPLOAD_TMP_FILE          "/tmp/swoole.upfile.XXXXXX"
+#define SW_HTTP_UPLOAD_TMPDIR_SIZE       256
 #define SW_HTTP_DATE_FORMAT              "D, d M Y H:i:s T"
 //#define SW_HTTP_100_CONTINUE
 #define SW_HTTP2_DATA_BUFFSER_SIZE       8192

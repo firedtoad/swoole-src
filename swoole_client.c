@@ -298,12 +298,21 @@ void php_swoole_client_check_setting(swClient *cli, zval *zset TSRMLS_DC)
 
     vht = Z_ARRVAL_P(zset);
 
-    //buffer: check eof
-    if (php_swoole_array_get_value(vht, "open_eof_split", v) || php_swoole_array_get_value(vht, "open_eof_check", v))
+    //buffer: eof check
+    if (php_swoole_array_get_value(vht, "open_eof_check", v))
     {
         convert_to_boolean(v);
         cli->open_eof_check = Z_BVAL_P(v);
-        cli->protocol.split_by_eof = 1;
+    }
+    //buffer: split package with eof
+    if (php_swoole_array_get_value(vht, "open_eof_split", v))
+    {
+        convert_to_boolean(v);
+        cli->protocol.split_by_eof = Z_BVAL_P(v);
+        if (cli->protocol.split_by_eof)
+        {
+            cli->open_eof_check = 1;
+        }
     }
     //package eof
     if (php_swoole_array_get_value(vht, "package_eof", v))
@@ -848,7 +857,6 @@ static PHP_METHOD(swoole_client, connect)
     {
         RETURN_FALSE;
     }
-
     swoole_set_object(getThis(), cli);
 
     if (cli->type == SW_SOCK_TCP || cli->type == SW_SOCK_TCP6)
@@ -1045,8 +1053,9 @@ static PHP_METHOD(swoole_client, sendfile)
 {
     char *file;
     zend_size_t file_len;
+    long offset = 0;
 
-    if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "s", &file, &file_len) == FAILURE)
+    if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "s|l", &file, &file_len, &offset) == FAILURE)
     {
         return;
     }
@@ -1075,7 +1084,7 @@ static PHP_METHOD(swoole_client, sendfile)
     }
     //clear errno
     SwooleG.error = 0;
-    int ret = cli->sendfile(cli, file);
+    int ret = cli->sendfile(cli, file, offset);
     if (ret < 0)
     {
         SwooleG.error = errno;

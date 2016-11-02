@@ -157,7 +157,8 @@ array_init(z##name);\
 zend_update_property(swoole_http_##class##_class_entry_ptr, z##class##_object, ZEND_STRL(#name), z##name TSRMLS_CC);\
 ctx->class.z##name = sw_zend_read_property(swoole_http_##class##_class_entry_ptr, z##class##_object, ZEND_STRL(#name), 0 TSRMLS_CC);\
 sw_copy_to_stack(ctx->class.z##name, ctx->request._z##name);\
-sw_zval_ptr_dtor(&z##name);
+sw_zval_ptr_dtor(&z##name);\
+z##name = ctx->class.z##name;
 
 #ifdef SW_USE_HTTP2
 /**
@@ -165,6 +166,7 @@ sw_zval_ptr_dtor(&z##name);
  */
 int swoole_http2_onFrame(swoole_http_client *client, swEventData *req);
 int swoole_http2_do_response(http_context *ctx, swString *body);
+void swoole_http2_free(swoole_http_client *client);
 #endif
 
 extern zend_class_entry swoole_http_server_ce;

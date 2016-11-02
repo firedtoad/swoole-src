@@ -43,7 +43,7 @@
 #include "Client.h"
 #include "async.h"
 
-#define PHP_SWOOLE_VERSION  "1.8.9-alpha"
+#define PHP_SWOOLE_VERSION  "1.8.14-alpha"
 #define PHP_SWOOLE_CHECK_CALLBACK
 
 /**
@@ -78,7 +78,7 @@ extern zend_module_entry swoole_module_entry;
 #endif
 
 #define SWOOLE_PROPERTY_MAX     32
-#define SWOOLE_OBJECT_MAX       1000000
+#define SWOOLE_OBJECT_MAX       10000000
 
 typedef struct
 {
@@ -337,6 +337,7 @@ void swoole_http_client_init(int module_number TSRMLS_DC);
 #ifdef SW_USE_REDIS
 void swoole_redis_init(int module_number TSRMLS_DC);
 #endif
+void swoole_redis_server_init(int module_number TSRMLS_DC);
 void swoole_process_init(int module_number TSRMLS_DC);
 void swoole_http_server_init(int module_number TSRMLS_DC);
 void swoole_websocket_init(int module_number TSRMLS_DC);

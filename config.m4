@@ -41,6 +41,9 @@ PHP_ARG_ENABLE(jemalloc, enable jemalloc support,
 PHP_ARG_ENABLE(tcmalloc, enable tcmalloc support,
 [  --enable-tcmalloc       Use tcmalloc?], no, no)
 
+PHP_ARG_ENABLE(hugepage, enable hugepage support,
+[  --enable-hugepage       Use hugepage?], no, no)
+
 PHP_ARG_ENABLE(swoole, swoole support,
 [  --enable-swoole         Enable swoole support], [enable_swoole="yes"])
 
@@ -153,6 +156,10 @@ if test "$PHP_SWOOLE" != "no"; then
 		AC_DEFINE(SW_USE_HTTP2, 1, [enable http2.0 support])
     fi
 
+	if test "$PHP_HUGEPAGE" = "yes"; then
+		AC_DEFINE(SW_USE_HUGEPAGE, 1, [enable hugepage support])
+    fi
+
     if test "$PHP_THREAD" = "yes"; then
 		AC_DEFINE(SW_USE_THREAD, 1, [enable thread support])
     fi
@@ -168,7 +175,8 @@ if test "$PHP_SWOOLE" != "no"; then
     AC_CHECK_LIB(c, timerfd_create, AC_DEFINE(HAVE_TIMERFD, 1, [have timerfd]))
     AC_CHECK_LIB(c, eventfd, AC_DEFINE(HAVE_EVENTFD, 1, [have eventfd]))
     AC_CHECK_LIB(c, epoll_create, AC_DEFINE(HAVE_EPOLL, 1, [have epoll]))
-	AC_CHECK_LIB(c, sendfile,PGSQL_INCLUDE AC_DEFINE(HAVE_SENDFILE, 1, [have sendfile]))
+    AC_CHECK_LIB(c, poll, AC_DEFINE(HAVE_POLL, 1, [have poll]))
+    AC_CHECK_LIB(c, sendfile, AC_DEFINE(HAVE_SENDFILE, 1, [have sendfile]))
     AC_CHECK_LIB(c, kqueue, AC_DEFINE(HAVE_KQUEUE, 1, [have kqueue]))
     AC_CHECK_LIB(c, backtrace, AC_DEFINE(HAVE_EXECINFO, 1, [have execinfo]))
     AC_CHECK_LIB(c, daemon, AC_DEFINE(HAVE_DAEMON, 1, [have daemon]))
@@ -251,7 +259,8 @@ if test "$PHP_SWOOLE" != "no"; then
         swoole_http_client.c \
         swoole_mysql.c \
         swoole_redis.c \
-        swoole_module.c \
+        swoole_redis_server.c \
+	    swoole_module.c \
         src/core/base.c \
         src/core/log.c \
         src/core/hashmap.c \
@@ -312,6 +321,7 @@ if test "$PHP_SWOOLE" != "no"; then
         src/protocol/Mqtt.c \
         src/protocol/Socks5.c \
         src/protocol/MimeTypes.c \
+        src/protocol/Redis.c \
         src/protocol/Base64.c"
 
     swoole_source_file="$swoole_source_file thirdparty/php_http_parser.c"

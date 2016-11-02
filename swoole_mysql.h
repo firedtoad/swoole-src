@@ -256,6 +256,7 @@ typedef struct
         uint16_t status_code;
         char status_msg[6];
         char *server_msg;
+        uint16_t l_server_msg;
         ulong_t affected_rows;
         ulong_t insert_id;
         zval *result_array;
@@ -705,6 +706,11 @@ static sw_inline int mysql_read_columns(mysql_client *client)
 
     for (; client->response.index_column < client->response.num_column; client->response.index_column++)
     {
+        if (n_buf < 4)
+        {
+            return SW_ERR;
+        }
+
         client->response.packet_length = mysql_uint3korr(buffer);
 
         //no enough data

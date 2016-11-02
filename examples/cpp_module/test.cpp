@@ -27,9 +27,11 @@ extern "C"
 }
 
 swVal* cppMethod(swModule *module, int argc);
+int test_get_length(swProtocol *protocol, swConnection *conn, char *data, uint32_t length);
 
 int swModule_init(swModule *module)
 {
+    printf("cpp module init\n");
     module->name = (char *) "test";
 
     string s = "123456789";
@@ -40,18 +42,25 @@ int swModule_init(swModule *module)
     swArgs_push_string(s.c_str(), s.length());
 
     swModule_register_function(module, (char *) "cppMethod", cppMethod);
+    swModule_register_global_function((char *) "test_get_length", (void *) test_get_length);
 
-    int ret = SwooleG.call_php_func(php_func.c_str());
-    if (ret < 0)
-    {
-        cout << "call php function failed." << endl;
-    }
-    else if (ret > 0)
-    {
-        int length;
-        cout << "return value type=" << ret << ", value=" <<  swReturnValue_get_string(&length) << endl;
-    }
+//    int ret = SwooleG.call_php_func(php_func.c_str());
+//    if (ret < 0)
+//    {
+//        cout << "call php function failed." << endl;
+//    }
+//    else if (ret > 0)
+//    {
+//        int length;
+//        cout << "return value type=" << ret << ", value=" <<  swReturnValue_get_string(&length) << endl;
+//    }
     return SW_OK;
+}
+
+int test_get_length(swProtocol *protocol, swConnection *conn, char *data, uint32_t length)
+{
+    printf("cpp, size=%d\n", length);
+    return 100;
 }
 
 /**
