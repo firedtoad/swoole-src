@@ -40,7 +40,16 @@ extern "C" {
 #include <assert.h>
 #include <time.h>
 #include <pthread.h>
+#if defined(HAVE_CPU_AFFINITY)
+#ifdef __FreeBSD__
+#include <sys/types.h>
+#include <sys/cpuset.h>
+#include <pthread_np.h>
+typedef cpuset_t cpu_set_t;
+#else
 #include <sched.h>
+#endif
+#endif
 
 #include <arpa/inet.h>
 #include <netinet/in.h>
@@ -285,9 +294,10 @@ SwooleGS->lock_2.unlock(&SwooleGS->lock_2);\
 exit(1)
 
 #define swSysError(str,...) SwooleGS->lock_2.lock(&SwooleGS->lock_2);\
-snprintf(sw_error,SW_ERROR_MSG_SIZE,"%s(:%d): " str " Error: %s[%d].",__func__,__LINE__,##__VA_ARGS__,strerror(errno),errno);\
-swLog_put(SW_LOG_ERROR, sw_error);\
-SwooleGS->lock_2.unlock(&SwooleGS->lock_2)
+    snprintf(sw_error,SW_ERROR_MSG_SIZE,"%s(:%d): " str " Error: %s[%d].",__func__,__LINE__,##__VA_ARGS__,strerror(errno),errno);\
+    swLog_put(SW_LOG_ERROR, sw_error);\
+    SwooleG.error=errno;\
+    SwooleGS->lock_2.unlock(&SwooleGS->lock_2)
 
 #define swoole_error_log(level, __errno, str, ...)      do{SwooleG.error=__errno;\
     if (level >= SwooleG.log_level){\
@@ -458,6 +468,7 @@ typedef struct _swConnection
 
     uint32_t removed :1;
     uint32_t overflow :1;
+    uint32_t high_watermark :1;
 
     uint32_t tcp_nopush :1;
     uint32_t tcp_nodelay :1;
@@ -474,14 +485,14 @@ typedef struct _swConnection
     uint16_t from_id;
 
     /**
-     * from which socket fd
-     */
-    uint16_t from_fd;
-
-    /**
      * close error code
      */
     uint16_t close_errno;
+
+    /**
+     * from which socket fd
+     */
+    sw_atomic_t from_fd;
 
     /**
      * socket address
@@ -559,6 +570,8 @@ typedef struct _swProtocol
     uint16_t package_body_offset;  //第几个字节开始计算长度
     uint32_t package_max_length;
 
+    void *private_data;
+
     int (*onPackage)(swConnection *conn, char *data, uint32_t length);
     int (*get_package_length)(struct _swProtocol *protocol, swConnection *conn, char *data, uint32_t length);
 } swProtocol;
@@ -597,8 +610,20 @@ void swString_print(swString *str);
 void swString_free(swString *str);
 int swString_append(swString *str, swString *append_str);
 int swString_append_ptr(swString *str, char *append_str, int length);
-
+int swString_write(swString *str, off_t offset, swString *write_str);
+int swString_write_ptr(swString *str, off_t offset, char *write_str, int length);
 int swString_extend(swString *str, size_t new_size);
+char* swString_alloc(swString *str, size_t __size);
+
+static sw_inline int swString_extend_align(swString *str, size_t _new_size)
+{
+    size_t align_size = str->size * 2;
+    while (align_size < _new_size)
+    {
+        align_size *= 2;
+    }
+    return swString_extend(str, align_size);
+}
 
 #define swString_length(s) (s->length)
 #define swString_ptr(s) (s->str)
@@ -714,16 +739,17 @@ typedef struct _swMsgQueue
 {
     int blocking;
     int msg_id;
-    int ipc_wait;
+    int flags;
     uint8_t remove;
     long type;
 } swMsgQueue;
 
 int swMsgQueue_create(swMsgQueue *q, int wait, key_t msg_key, long type);
-int swMsgQueue_push(swMsgQueue *p, swQueue_data *in, int data_length);
-int swMsgQueue_pop(swMsgQueue *p, swQueue_data *out, int buffer_length);
+void swMsgQueue_set_blocking(swMsgQueue *q, uint8_t blocking);
+int swMsgQueue_push(swMsgQueue *q, swQueue_data *in, int data_length);
+int swMsgQueue_pop(swMsgQueue *q, swQueue_data *out, int buffer_length);
 int swMsgQueue_stat(swMsgQueue *q, int *queue_num, int *queue_bytes);
-void swMsgQueue_free(swMsgQueue *p);
+void swMsgQueue_free(swMsgQueue *q);
 
 //------------------Lock--------------------------------------
 enum SW_LOCKS
@@ -744,7 +770,6 @@ enum SW_LOCKS
 
 enum swDNSLookup_cache_type
 {
-    SW_DNS_LOOKUP_CACHE_ONLY =  (1u << 10),
     SW_DNS_LOOKUP_RANDOM  = (1u << 11),
 };
 
@@ -1115,6 +1140,8 @@ int swoole_system_random(int min, int max);
 long swoole_file_get_size(FILE *fp);
 int swoole_tmpfile(char *filename);
 swString* swoole_file_get_contents(char *filename);
+int swoole_file_put_contents(char *filename, char *content, size_t length);
+long swoole_file_size(char *filename);
 void swoole_open_remote_debug(void);
 char *swoole_dec2hex(int value, int base);
 int swoole_version_compare(char *version1, char *version2);
@@ -1122,7 +1149,7 @@ int swoole_version_compare(char *version1, char *version2);
 void swoole_print_trace(void);
 #endif
 void swoole_ioctl_set_block(int sock, int nonblock);
-void swoole_fcntl_set_block(int sock, int nonblock);
+void swoole_fcntl_set_option(int sock, int nonblock, int cloexec);
 int swoole_gethostbyname(int type, char *name, char *addr);
 //----------------------core function---------------------
 int swSocket_set_timeout(int sock, double timeout);
@@ -1141,8 +1168,8 @@ static sw_inline int swSocket_is_stream(uint8_t type)
 #define swSetNonBlock(sock)   swoole_ioctl_set_block(sock, 1)
 #define swSetBlock(sock)      swoole_ioctl_set_block(sock, 0)
 #else
-#define swSetNonBlock(sock)   swoole_fcntl_set_block(sock, 1)
-#define swSetBlock(sock)      swoole_fcntl_set_block(sock, 0)
+#define swSetNonBlock(sock)   swoole_fcntl_set_option(sock, 1, 0)
+#define swSetBlock(sock)      swoole_fcntl_set_option(sock, 0, 0)
 #endif
 
 void swoole_init(void);
@@ -1150,6 +1177,7 @@ void swoole_clean(void);
 void swoole_update_time(void);
 double swoole_microtime(void);
 void swoole_rtrim(char *str, int len);
+void swoole_redirect_stdout(int new_fd);
 
 static sw_inline uint64_t swoole_hton64(uint64_t host)
 {
@@ -1183,7 +1211,7 @@ static sw_inline uint64_t swoole_ntoh64(uint64_t net)
 }
 
 int swSocket_create(int type);
-int swSocket_bind(int sock, int type, char *host, int port);
+int swSocket_bind(int sock, int type, char *host, int *port);
 int swSocket_wait(int fd, int timeout_ms, int events);
 int swSocket_wait_multi(int *list_of_fd, int n_fd, int timeout_ms, int events);
 void swSocket_clean(int fd);
@@ -1571,20 +1599,21 @@ enum SW_CHANNEL_FLAGS
 
 typedef struct _swChannel
 {
-	int head;    //头部，出队列方向
-	int tail;    //尾部，入队列方向
-	int size;    //队列总尺寸
-	char head_tag;
-	char tail_tag;
-	int num;
-	int flag;
-	int maxlen;
-	void *mem;   //内存块
-	swLock lock;
-	swPipe notify_fd;
+    off_t head;
+    off_t tail;
+    size_t size;
+    char head_tag;
+    char tail_tag;
+    int num;
+    size_t bytes;
+    int flag;
+    int maxlen;
+    void *mem;   //内存块
+    swLock lock;
+    swPipe notify_fd;
 } swChannel;
 
-swChannel* swChannel_new(int size, int maxlen, int flag);
+swChannel* swChannel_new(size_t size, int maxlen, int flag);
 int swChannel_pop(swChannel *object, void *out, int buffer_length);
 int swChannel_push(swChannel *object, void *in, int data_length);
 int swChannel_out(swChannel *object, void *out, int buffer_length);
@@ -1706,7 +1735,6 @@ typedef struct
 
     uint32_t session_round :24;
     uint8_t start;  //after swServer_start will set start=1
-    uint16_t logfile_version;
 
     time_t now;
 
@@ -1743,9 +1771,8 @@ typedef struct
     uint32_t in_client :1;
     uint32_t shutdown :1;
     uint32_t reload;
-    uint32_t reload_count;   //reload计数
+    uint32_t reload_count;
     uint32_t request_count;
-    uint16_t logfile_version;
 
     int max_request;
 
@@ -1765,6 +1792,15 @@ typedef struct
     swString **buffer_input;
 } swThreadG;
 
+typedef struct
+{
+    union
+    {
+        char v4[INET_ADDRSTRLEN];
+        char v6[INET6_ADDRSTRLEN];
+    } address;
+} swDNS_server;
+
 typedef struct _swServer swServer;
 typedef struct _swFactory swFactory;
 
@@ -1777,8 +1813,8 @@ typedef struct
     uint8_t use_signalfd :1;
     uint8_t reuse_port :1;
     uint8_t socket_dontwait :1;
-    uint8_t disable_dns_cache :1;
-    uint8_t dns_lookup_random: 1;
+    uint8_t dns_lookup_random :1;
+    uint8_t use_async_resolver :1;
 
     /**
      * Timer used pipe
@@ -1809,10 +1845,6 @@ typedef struct
      *  task worker process num
      */
     uint16_t task_worker_num;
-    /**
-     *  task worker process max
-     */
-    uint8_t task_recycle_num;
     char *task_tmpdir;
     uint16_t task_tmpdir_len;
     uint8_t task_ipc_mode;
@@ -1840,6 +1872,10 @@ typedef struct
 
     pthread_t heartbeat_pidt;
 
+    char *dns_server_v4;
+    char *dns_server_v6;
+
+    swLock lock;
     swString *module_stack;
     int call_php_func_argc;
     int (*call_php_func)(const char *name);

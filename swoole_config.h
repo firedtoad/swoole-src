@@ -31,6 +31,7 @@
 
 //#define SW_USE_MALLOC_TRIM
 #define SW_USE_EVENT_TIMER
+#define SW_USE_MONOTONIC_TIME
 //#define SW_USE_RINGBUFFER
 
 //#define SW_DEBUG_REMOTE_OPEN
@@ -130,7 +131,7 @@
 #define SW_REACTOR_USE_SESSION
 #define SW_SESSION_LIST_SIZE             (1024*1024)
 
-#define SW_MSGMAX                        8192
+#define SW_MSGMAX                        65536
 
 /**
  * 最大Reactor线程数量，默认会启动CPU核数的线程数
@@ -213,11 +214,13 @@
 
 #define SW_STRING_BUFFER_MAXLEN          (1024*1024*128)
 #define SW_STRING_BUFFER_DEFAULT         128
+#define SW_STRING_BUFFER_GARBAGE_MIN     (1024*64)
+#define SW_STRING_BUFFER_GARBAGE_RATIO   4
 
 #define SW_SIGNO_MAX                     128
 
-#define SW_DNS_LOOKUP_USE_THREAD
-#define SW_DNS_LOOKUP_CACHE_SIZE         4
+#define SW_DNS_HOST_BUFFER_SIZE          16
+#define SW_DNS_SERVER_PORT               53
 
 //#define SW_HTTP_CLIENT_ENABLE
 

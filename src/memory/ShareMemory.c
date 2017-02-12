@@ -99,11 +99,11 @@ void *swShareMemory_mmap_create(swShareMemory *object, int size, char *mapfile)
 #ifdef MAP_ANONYMOUS
     flag |= MAP_ANONYMOUS;
 #else
-    if(mapfile == NULL)
+    if (mapfile == NULL)
     {
         mapfile = "/dev/zero";
     }
-    if((tmpfd = open(mapfile, O_RDWR)) < 0)
+    if ((tmpfd = open(mapfile, O_RDWR)) < 0)
     {
         return NULL;
     }
@@ -157,7 +157,7 @@ void *swShareMemory_sysv_create(swShareMemory *object, int size, int key)
         swWarn("shmget() failed. Error: %s[%d]", strerror(errno), errno);
         return NULL;
     }
-    if ((mem = shmat(shmid, NULL, 0)) < 0)
+    if ((mem = shmat(shmid, NULL, 0)) == (void *) -1)
     {
         swWarn("shmat() failed. Error: %s[%d]", strerror(errno), errno);
         return NULL;

@@ -170,11 +170,13 @@ int swReactorProcess_start(swServer *serv)
     SwooleG.use_timerfd = 0;
     SwooleG.use_signalfd = 0;
     SwooleG.use_timer_pipe = 0;
-    swServer_signal_init();
+    swServer_signal_init(serv);
 
     swProcessPool_start(&SwooleGS->event_workers);
     swProcessPool_wait(&SwooleGS->event_workers);
     swProcessPool_shutdown(&SwooleGS->event_workers);
+
+    swManager_kill_user_worker(serv);
 
     return SW_OK;
 }
@@ -387,13 +389,7 @@ static int swReactorProcess_loop(swProcessPool *pool, swWorker *worker)
 int swReactorProcess_onClose(swReactor *reactor, swEvent *event)
 {
     int fd = event->fd;
-    swDataHead notify_ev;
-    bzero(&notify_ev, sizeof(notify_ev));
-
-    notify_ev.from_id = reactor->id;
-    notify_ev.fd = fd;
-    notify_ev.type = SW_EVENT_CLOSE;
-
+    swServer *serv = reactor->ptr;
     swConnection *conn = swServer_connection_get(SwooleG.serv, fd);
     if (conn == NULL || conn->active == 0)
     {
@@ -401,7 +397,7 @@ int swReactorProcess_onClose(swReactor *reactor, swEvent *event)
     }
     if (reactor->del(reactor, fd) == 0)
     {
-        return SwooleG.factory->notify(SwooleG.factory, &notify_ev);
+        return swServer_tcp_notify(serv, conn, SW_EVENT_CLOSE);
     }
     else
     {
@@ -550,8 +546,9 @@ static int swReactorProcess_reuse_port(swListenPort *ls)
         return SW_ERR;
     }
     //bind address and port
-    if (swSocket_bind(sock, ls->type, ls->host, ls->port) < 0)
+    if (swSocket_bind(sock, ls->type, ls->host, &ls->port) < 0)
     {
+        close(sock);
         return SW_ERR;
     }
     //stream socket, set nonblock

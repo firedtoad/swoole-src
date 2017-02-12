@@ -103,7 +103,7 @@ static sw_inline int swReactorThread_verify_ssl_state(swReactor *reactor, swList
             no_client_cert:
             if (SwooleG.serv->onConnect)
             {
-                swServer_connection_ready(SwooleG.serv, conn->fd, conn->from_id);
+                swServer_tcp_notify(SwooleG.serv, conn, SW_EVENT_CONNECT);
             }
             delay_receive:
             if (serv->enable_delay_receive)
@@ -422,13 +422,15 @@ static int swReactorThread_onPipeReceive(swReactor *reactor, swEvent *ev)
         if (n > 0)
         {
             memcpy(&_send.info, &resp.info, sizeof(resp.info));
+            //pipe data
             if (_send.info.from_fd == SW_RESPONSE_SMALL)
             {
                 _send.data = resp.data;
                 _send.length = resp.info.len;
                 swReactorThread_send(&_send);
             }
-            else
+            //use send shm
+            else if (_send.info.from_fd == SW_RESPONSE_SHM)
             {
                 memcpy(&pkg_resp, resp.data, sizeof(pkg_resp));
                 worker = swServer_get_worker(SwooleG.serv, pkg_resp.worker_id);
@@ -449,6 +451,22 @@ static int swReactorThread_onPipeReceive(swReactor *reactor, swEvent *ev)
 #endif
                 swReactorThread_send(&_send);
                 worker->lock.unlock(&worker->lock);
+            }
+            //use tmp file
+            else if (_send.info.from_fd == SW_RESPONSE_TMPFILE)
+            {
+                swString *data = swTaskWorker_large_unpack(&resp);
+                if (data == NULL)
+                {
+                    return SW_ERR;
+                }
+                _send.data = data->str;
+                _send.length = data->length;
+                swReactorThread_send(&_send);
+            }
+            else
+            {
+                abort();
             }
         }
         else if (errno == EAGAIN)
@@ -691,6 +709,13 @@ int swReactorThread_send(swSendData *_send)
             _pos += _n;
             _length -= _n;
         }
+
+        swListenPort *port = swServer_get_port(serv, fd);
+        if (serv->onBufferFull && conn->out_buffer->length >= port->buffer_high_watermark)
+        {
+            swServer_tcp_notify(serv, conn, SW_EVENT_BUFFER_FULL);
+            conn->high_watermark = 1;
+        }
     }
 
     //listen EPOLLOUT event
@@ -811,6 +836,14 @@ void swReactorThread_set_protocol(swServer *serv, swReactor *reactor)
 static int swReactorThread_onRead(swReactor *reactor, swEvent *event)
 {
     swServer *serv = reactor->ptr;
+    /**
+     * invalid event
+     * The server has been actively closed the connection, the client also initiated off, fd has been reused.
+     */
+    if (event->socket->from_fd == 0)
+    {
+        return SW_OK;
+    }
     swListenPort *port = swServer_get_port(serv, event->fd);
 #ifdef SW_USE_OPENSSL
     if (swReactorThread_verify_ssl_state(reactor, port, event->socket) < 0)
@@ -842,7 +875,7 @@ static int swReactorThread_onWrite(swReactor *reactor, swEvent *ev)
     //notify worker process
     else if (conn->connect_notify)
     {
-        swServer_connection_ready(serv, fd, reactor->id);
+        swServer_tcp_notify(serv, conn, SW_EVENT_CONNECT);
         conn->connect_notify = 0;
         if (serv->enable_delay_receive)
         {
@@ -862,15 +895,7 @@ static int swReactorThread_onWrite(swReactor *reactor, swEvent *ev)
             return swReactorThread_close(reactor, fd);
         }
 #endif
-        swDataHead close_event;
-        close_event.type = SW_EVENT_CLOSE;
-        close_event.from_id = reactor->id;
-        close_event.fd = fd;
-
-        if (serv->factory.notify(&serv->factory, &close_event) < 0)
-        {
-            swWarn("send notification [fd=%d] failed.", fd);
-        }
+        swServer_tcp_notify(serv, conn, SW_EVENT_CLOSE);
         conn->close_notify = 0;
         return SW_OK;
     }
@@ -906,7 +931,7 @@ static int swReactorThread_onWrite(swReactor *reactor, swEvent *ev)
             }
             else if (conn->send_wait)
             {
-                return SW_OK;
+                break;
             }
         }
     }
@@ -916,8 +941,18 @@ static int swReactorThread_onWrite(swReactor *reactor, swEvent *ev)
         conn->overflow = 0;
     }
 
+    if (serv->onBufferEmpty && conn->high_watermark)
+    {
+        swListenPort *port = swServer_get_port(serv, fd);
+        if (conn->out_buffer->length <= port->buffer_low_watermark)
+        {
+            swServer_tcp_notify(serv, conn, SW_EVENT_BUFFER_EMPTY);
+            conn->high_watermark = 0;
+        }
+    }
+
     //remove EPOLLOUT event
-    if (swBuffer_empty(conn->out_buffer))
+    if (!conn->removed && swBuffer_empty(conn->out_buffer))
     {
         reactor->set(reactor, fd, SW_FD_TCP | SW_EVENT_READ);
     }

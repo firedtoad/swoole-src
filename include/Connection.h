@@ -91,6 +91,7 @@ typedef struct
     char *ciphers;
     char *ecdh_curve;
     char *session_cache;
+    char *dhparam;
 } swSSL_config;
 
 void swSSL_init(void);
@@ -177,15 +178,17 @@ static sw_inline int swConnection_error(int err)
     case EFAULT:
         abort();
         return SW_ERROR;
-	case ECONNRESET:
-	case EPIPE:
-	case ENOTCONN:
-	case ETIMEDOUT:
-	case ECONNREFUSED:
-	case ENETDOWN:
-	case ENETUNREACH:
-	case EHOSTDOWN:
-	case EHOSTUNREACH:
+    case EBADF:
+    case ECONNRESET:
+    case EPIPE:
+    case ENOTCONN:
+    case ETIMEDOUT:
+    case ECONNREFUSED:
+    case ENETDOWN:
+    case ENETUNREACH:
+    case EHOSTDOWN:
+    case EHOSTUNREACH:
+    case SW_ERROR_SSL_BAD_CLIENT:
 		return SW_CLOSE;
 	case EAGAIN:
 #ifdef HAVE_KQUEUE

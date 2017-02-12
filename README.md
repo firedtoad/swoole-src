@@ -8,17 +8,65 @@ Swoole is an event-driven asynchronous & concurrent networking communication fra
 
 __Document__: <https://rawgit.com/tchiotludo/swoole-ide-helper/english/docs/index.html>
 
-__IDE Helper__: <https://github.com/tchiotludo/swoole-ide-helper>
+__IDE Helper__: <https://github.com/swoole/ide-helper>
 
 __中文文档__: <http://wiki.swoole.com/>
 
-__IRC__:  <http://webchat.freenode.net/?channels=swoole&uio=d4>
+__IRC__:  <https://gitter.im/swoole/swoole-src>
 
 
 event-based
 ------
 
 The network layer in Swoole is event-based and takes full advantage of the underlaying epoll/kqueue implementation, making it really easy to serve thousands of connections.
+
+coroutine
+----------------
+[Swoole 2.0](Version2.md) support the  built-in coroutine, you can use fully synchronized code to implement asynchronous program. 
+PHP code without any additional keywords, the underlying automatic coroutine-scheduling.
+
+```php
+<?php
+for($i = 0; $i < 100; $i++) {
+    Swoole\Coroutine::create(function() use ($i) {
+        $redis = new Swoole\Coroutine\Redis();
+        $res = $redis->connect('127.0.0.1', 6379);
+        $ret = $redis->incr('coroutine');
+        $redis->close();
+        if ($i == 50) {
+            Swoole\Coroutine::create(function() use ($i) {
+                $redis = new Swoole\Coroutine\Redis();
+                $res = $redis->connect('127.0.0.1', 6379);
+                $ret = $redis->set('coroutine_i', 50);
+                $redis->close();
+            });
+        }
+    });
+}
+```
+
+```php
+<?php  
+$server = new Swoole\Http\Server('127.0.0.1', 9501);
+
+$server->on('Request', function($request, $response) {
+
+    $tcp_cli = new Swoole\Coroutine\Client(SWOOLE_SOCK_TCP);
+    $ret = $tcp_cli->connect('127.0.0.1', 9906);
+    $tcp_cli ->send('test for the coro');
+    $ret = $tcp_cli->recv(5);
+    $tcp_cli->close();
+
+    if ($ret) {
+        $response->end(" swoole response is ok");
+    }
+    else{
+        $response->end(" recv failed error : {$client->errCode}");
+    }
+});
+
+$server->start();
+```
 
 concurrent
 ------
@@ -405,11 +453,10 @@ bool swoole_client::close();
 
 Refer [API Reference](http://wiki.swoole.com/wiki/page/3.html) for more detail information of these functions.
 
-
 ## API Reference
 
 * [中文](http://wiki.swoole.com/) 
-* [English](https://cdn.rawgit.com/tchiotludo/swoole-ide-helper/dd73ce0dd949870daebbf3e8fee64361858422a1/docs/index.html)
+* [English](https://rawgit.com/tchiotludo/swoole-ide-helper/english/docs/index.html)
 
 ## Related Projects
 
