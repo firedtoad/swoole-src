@@ -12,18 +12,10 @@ $serv->set(array(
 		//'daemonize' => true,
 		//'log_file' => '/tmp/swoole.log'
 ));
-$serv->on('timer', function($serv, $interval) {
-	echo "onTimer: $interval\n";
-});
-
-$serv->on('start', function($serv) {
-	//$serv->addtimer(1000);
-});
 
 $serv->on('workerStart', function($serv, $worker_id) {
 	echo "{$worker_id} start".PHP_EOL;
 	$serv->workerid = $worker_id;
-	//if($worker_id == 0) $serv->addtimer(1000);
 });
 
 $serv->on('connect', function ($serv, $fd, $from_id){
@@ -42,7 +34,7 @@ $serv->on('task', function ($serv, $task_id, $from_id, $data){
 });
 
 $serv->on('finish', function ($serv, $fd, $from_id){
-	
+
 });
 
 $serv->on('receive', function (swoole_server $serv, $fd, $from_id, $data) {
